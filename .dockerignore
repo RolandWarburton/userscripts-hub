@@ -1,0 +1,6 @@
+# Keep scripts, keys and secrets out of the build context
+scripts
+keys
+.env
+.git
+*.md

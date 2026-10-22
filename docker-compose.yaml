@@ -1,0 +1,72 @@
+# Serves Tampermonkey userscripts at https://<host>/<name>.user.js?auth=KEY
+# (and <name>.meta.js for update checks built on-demand).
+services:
+  userscripts:
+    build: .
+    image: userscripts:latest
+    container_name: userscripts
+    restart: unless-stopped
+    # ./scripts and ./keys must exist and be writable by uid 1000
+    user: "1000:1000"
+    volumes:
+      - ./scripts:/scripts
+      - ./keys:/keys
+    environment:
+      - SCRIPTS_DIR=/scripts
+      - KEYS_DIR=/keys
+      - PORT=8080
+      - BASE_URL=https://${DOMAIN:?set DOMAIN in .env}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - NTFY_URL=${NTFY_URL:-}
+      - NTFY_TOKEN=${NTFY_TOKEN:-}
+      - MCP_ENABLED=${MCP_ENABLED:-false}
+      - MCP_RESOURCE_URL=${MCP_RESOURCE_URL:-}
+      - MCP_ALLOWED_EMAILS=${MCP_ALLOWED_EMAILS:-}
+      - MCP_OIDC_ISSUER=${MCP_OIDC_ISSUER:-}
+      - GOMEMLIMIT=64MiB
+    healthcheck:
+      test: ["CMD", "/server", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - services
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=services"
+      - "traefik.http.services.userscripts.loadbalancer.server.port=8080"
+      # Public script downloads
+      - "traefik.http.routers.userscripts.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.userscripts.entrypoints=websecure"
+      - "traefik.http.routers.userscripts.tls=true"
+      - "traefik.http.routers.userscripts.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.userscripts.service=userscripts"
+      # Admin API
+      - "traefik.http.routers.userscripts-api.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/`)"
+      - "traefik.http.routers.userscripts-api.entrypoints=websecure"
+      - "traefik.http.routers.userscripts-api.tls=true"
+      - "traefik.http.routers.userscripts-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.userscripts-api.service=userscripts"
+      - "traefik.http.routers.userscripts-api.middlewares=userscripts-api-ratelimit"
+      - "traefik.http.middlewares.userscripts-api-ratelimit.ratelimit.average=20"
+      - "traefik.http.middlewares.userscripts-api-ratelimit.ratelimit.period=1m"
+      - "traefik.http.middlewares.userscripts-api-ratelimit.ratelimit.burst=20"
+      # MCP and its OAuth metadata
+      - "traefik.http.routers.userscripts-mcp.rule=Host(`${DOMAIN}`) && (Path(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`))"
+      - "traefik.http.routers.userscripts-mcp.entrypoints=websecure"
+      - "traefik.http.routers.userscripts-mcp.tls=true"
+      - "traefik.http.routers.userscripts-mcp.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.userscripts-mcp.service=userscripts"
+      - "traefik.http.routers.userscripts-mcp.middlewares=userscripts-mcp-ratelimit"
+      - "traefik.http.middlewares.userscripts-mcp-ratelimit.ratelimit.average=80"
+      - "traefik.http.middlewares.userscripts-mcp-ratelimit.ratelimit.period=1m"
+      - "traefik.http.middlewares.userscripts-mcp-ratelimit.ratelimit.burst=80"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+networks:
+  services:
+    external: true

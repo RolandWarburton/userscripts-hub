@@ -1,0 +1,6 @@
+scripts/*
+!scripts/.gitkeep
+keys/*
+!keys/.gitkeep
+.env
+/server
