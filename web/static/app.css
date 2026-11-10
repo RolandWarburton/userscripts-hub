@@ -1,5 +1,6 @@
 /* The page's own layout. tokens.css and bundle.css are the flat design system, copied
-   as they are; this file only arranges its pieces and adds the editor. */
+   as they are; this file only arranges its pieces and adds the editor.
+   Refresh tokens.css and bundle.css by hand when the design system changes. */
 
 body { margin: 0; background: var(--bg); }
 .page { min-height: 100vh; padding: var(--space-16); display: grid; gap: var(--space-32); align-content: start; }
