@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>userscripts</title>
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/bundle.css">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="wc page">
+  <header class="wc-top">
+    <div class="wc-brand">
+      <h1 class="wc-brand-name"><a href="/">userscripts</a></h1>
+      <span class="wc-brand-sub">script admin</span>
+    </div>
+    <div class="wc-who">
+      <span class="wc-email" id="email"></span>
+      <a class="wc-btn" href="/oauth2/sign_out">Sign out</a>
+    </div>
+  </header>
+
+  <section class="wc-empty" id="ended" hidden>
+    <div>
+      <h2>Your session has ended</h2>
+      <p>Sign in again to keep working. Copy any unsaved changes first: signing in reloads the page and discards them.</p>
+    </div>
+    <p><a class="wc-btn wc-btn-primary" id="sign-in" href="/">Sign in again</a></p>
+  </section>
+
+  <div class="wc-app" id="app">
+    <section class="wc-pane-list">
+      <div class="wc-bar"><h2>Scripts</h2><span class="wc-count" id="count"></span></div>
+      <div class="list-tools">
+        <a class="wc-btn" href="/new" data-nav>New script</a>
+        <span class="list-filters">
+          <span class="site-field">
+            <label class="wc-label" for="sort">Sort</label>
+            <select class="wc-input" id="sort">
+              <option value="name">Name</option>
+              <option value="modified">Last edited</option>
+            </select>
+          </span>
+          <span class="site-field" id="site-field" hidden>
+            <label class="wc-label" for="site">Site</label>
+            <select class="wc-input" id="site"></select>
+          </span>
+        </span>
+      </div>
+      <ul class="wc-rows" id="rows"></ul>
+      <p class="wc-none" id="no-scripts" hidden>No scripts yet. Start one with New script, or publish one through Claude.</p>
+      <p class="problem" id="list-problem" hidden></p>
+    </section>
+
+    <section class="wc-empty" id="empty">
+      <div>
+        <h2>No script selected</h2>
+        <p>Choose a script from the list to edit it, or start a new one. Press <kbd>Esc</kbd> to close the open script.</p>
+      </div>
+      <dl class="wc-facts">
+        <div class="wc-fact"><dt>Scripts</dt><dd id="total"></dd></div>
+        <div class="wc-fact"><dt>Last change</dt><dd id="last"></dd></div>
+      </dl>
+    </section>
+
+    <section id="open" hidden>
+      <div class="wc-call-top">
+        <a class="wc-btn" href="/" data-nav><span class="wc-back-narrow">← All scripts</span><span class="wc-back-wide">Close</span></a>
+        <button type="button" class="wc-btn" id="delete-open">Delete script…</button>
+      </div>
+      <div class="wc-stack">
+        <div class="wc-confirm" id="confirm" hidden>
+          <p id="confirm-text"></p>
+          <div class="wc-btns">
+            <button type="button" class="wc-btn wc-btn-danger" id="delete">Delete</button>
+            <button type="button" class="wc-btn wc-btn-cancel" id="delete-cancel">Cancel</button>
+          </div>
+        </div>
+
+        <section class="wc-card wc-hero">
+          <div class="wc-title-row"><h2 class="wc-title" id="title"></h2></div>
+          <span class="wc-hero-ago" id="hero-ago"></span>
+          <div id="name-field" hidden>
+            <label class="wc-label" for="name">Name</label>
+            <input class="wc-input" id="name" maxlength="100" autocomplete="off" spellcheck="false" placeholder="my-script">
+            <p class="hint" id="name-hint">Letters, digits, _ and - only. It becomes the file name: my-script.user.js.</p>
+          </div>
+          <div class="facts" id="facts">
+            <dl class="wc-facts">
+              <div class="wc-fact"><dt>Version</dt><dd id="f-version"></dd></div>
+              <div class="wc-fact"><dt>Modified</dt><dd id="f-modified"></dd></div>
+              <div class="wc-fact"><dt>Size</dt><dd id="f-size"></dd></div>
+              <div class="wc-fact"><dt>Name</dt><dd id="f-name"></dd></div>
+            </dl>
+            <dl class="wc-facts">
+              <div class="wc-fact"><dt>SHA-256</dt><dd id="f-sha"></dd></div>
+            </dl>
+            <dl class="wc-facts">
+              <div class="wc-fact"><dt>Install URL</dt><dd class="fact-line">
+                <a id="f-install" href="/"></a>
+                <button type="button" class="wc-btn" id="copy">Copy</button>
+              </dd></div>
+            </dl>
+          </div>
+        </section>
+
+        <section class="wc-card" id="editor-card">
+          <div class="wc-head">
+            <h3><label for="source">Source</label></h3>
+            <div class="wc-tools">
+              <span class="wc-status" id="status" role="status"></span>
+              <button type="button" class="wc-btn wc-btn-primary" id="save">Save</button>
+            </div>
+          </div>
+          <p class="problem" id="problem" role="alert" hidden></p>
+          <textarea class="editor" id="source" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
+          <p class="hint">Tab indents, Shift+Tab outdents. Press Esc, then Tab, to leave the editor.</p>
+        </section>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

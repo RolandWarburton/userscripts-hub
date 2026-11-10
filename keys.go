@@ -1,7 +1,7 @@
 package main
 
 // Per-script read keys in KEYS_DIR, which public downloads need in ?auth=, plus the
-// constant-time comparison used for those keys and the admin token.
+// constant-time comparison used for those keys.
 
 import (
 	"crypto/rand"

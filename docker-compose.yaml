@@ -1,5 +1,6 @@
-# Serves Tampermonkey userscripts at https://<host>/<name>.user.js?auth=KEY
-# (and <name>.meta.js for update checks built on-demand).
+# Serves Tampermonkey userscripts at https://<DOMAIN>/<name>.user.js?auth=KEY
+# (and <name>.meta.js for update checks built on-demand), the MCP server at
+# https://<DOMAIN>/mcp, and the dashboard at https://<ADMIN_DOMAIN>/ through oauth2-proxy.
 services:
   userscripts:
     build: .
@@ -16,13 +17,13 @@ services:
       - KEYS_DIR=/keys
       - PORT=8080
       - BASE_URL=https://${DOMAIN:?set DOMAIN in .env}
-      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - ADMIN_DOMAIN=${ADMIN_DOMAIN:?set ADMIN_DOMAIN in .env}
       - NTFY_URL=${NTFY_URL:-}
       - NTFY_TOKEN=${NTFY_TOKEN:-}
       - MCP_ENABLED=${MCP_ENABLED:-false}
       - MCP_RESOURCE_URL=${MCP_RESOURCE_URL:-}
-      - MCP_ALLOWED_EMAILS=${MCP_ALLOWED_EMAILS:-}
-      - MCP_OIDC_ISSUER=${MCP_OIDC_ISSUER:-}
+      - MCP_ALLOWED_EMAILS=${MCP_ALLOWED_EMAILS:?set MCP_ALLOWED_EMAILS in .env}
+      - MCP_OIDC_ISSUER=${MCP_OIDC_ISSUER:?set MCP_OIDC_ISSUER in .env}
       - GOMEMLIMIT=64MiB
     healthcheck:
       test: ["CMD", "/server", "healthcheck"]
@@ -36,22 +37,14 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=services"
       - "traefik.http.services.userscripts.loadbalancer.server.port=8080"
-      # Public script downloads
+      # Public script downloads. The dashboard is not routed here: its host goes to
+      # userscripts-admin below, and this server only serves it to requests carrying a
+      # Dex token for the dashboard's client.
       - "traefik.http.routers.userscripts.rule=Host(`${DOMAIN}`)"
       - "traefik.http.routers.userscripts.entrypoints=websecure"
       - "traefik.http.routers.userscripts.tls=true"
       - "traefik.http.routers.userscripts.tls.certresolver=letsencrypt"
       - "traefik.http.routers.userscripts.service=userscripts"
-      # Admin API
-      - "traefik.http.routers.userscripts-api.rule=Host(`${DOMAIN}`) && PathPrefix(`/api/`)"
-      - "traefik.http.routers.userscripts-api.entrypoints=websecure"
-      - "traefik.http.routers.userscripts-api.tls=true"
-      - "traefik.http.routers.userscripts-api.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.userscripts-api.service=userscripts"
-      - "traefik.http.routers.userscripts-api.middlewares=userscripts-api-ratelimit"
-      - "traefik.http.middlewares.userscripts-api-ratelimit.ratelimit.average=20"
-      - "traefik.http.middlewares.userscripts-api-ratelimit.ratelimit.period=1m"
-      - "traefik.http.middlewares.userscripts-api-ratelimit.ratelimit.burst=20"
       # MCP and its OAuth metadata
       - "traefik.http.routers.userscripts-mcp.rule=Host(`${DOMAIN}`) && (Path(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`))"
       - "traefik.http.routers.userscripts-mcp.entrypoints=websecure"
@@ -66,6 +59,80 @@ services:
       resources:
         limits:
           memory: 128M
+
+  # The dashboard's front door: signs the browser in with Dex, then proxies to the server
+  # with the Dex access token attached, which the server checks again on every request.
+  # A reverse proxy rather than a Traefik ForwardAuth endpoint, so a signed-out browser
+  # is redirected to Dex instead of shown a bare 401.
+  userscripts-admin:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.13.0@sha256:56e3daedf765c7a1eea6e366fbe684be7d3084830ade14b6174570d3c7960954
+    container_name: userscripts-admin
+    restart: unless-stopped
+    depends_on:
+      - userscripts
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      OAUTH2_PROXY_HTTP_ADDRESS: "0.0.0.0:4180"
+      OAUTH2_PROXY_UPSTREAMS: "http://userscripts:8080/"
+      OAUTH2_PROXY_REVERSE_PROXY: "true" # behind Traefik: build redirects from X-Forwarded-*
+      OAUTH2_PROXY_REAL_CLIENT_IP_HEADER: "X-Real-Ip"
+
+      # Dex. The issuer must match the token's iss exactly: no trailing slash.
+      OAUTH2_PROXY_PROVIDER: "oidc"
+      OAUTH2_PROXY_OIDC_ISSUER_URL: "${MCP_OIDC_ISSUER:?set MCP_OIDC_ISSUER in .env}"
+      OAUTH2_PROXY_CLIENT_ID: "${WEB_OIDC_CLIENT_ID:-userscripts-web}"
+      OAUTH2_PROXY_CLIENT_SECRET: "${WEB_OIDC_CLIENT_SECRET:?set WEB_OIDC_CLIENT_SECRET in .env}"
+      OAUTH2_PROXY_REDIRECT_URL: "https://${ADMIN_DOMAIN}/oauth2/callback"
+      # Only what's needed to know who you are: no profile, and no offline_access, so
+      # no refresh token is ever issued or kept.
+      OAUTH2_PROXY_SCOPE: "openid email"
+      OAUTH2_PROXY_CODE_CHALLENGE_METHOD: "S256"
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+      # Any Dex account may finish signing in here; the server then refuses everyone
+      # not in MCP_ALLOWED_EMAILS, so there is one allowlist for the MCP and the dashboard.
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      # Hand the server the access token to check (X-Forwarded-Access-Token).
+      OAUTH2_PROXY_PASS_ACCESS_TOKEN: "true"
+
+      # Session cookie. __Host- makes the browser insist on Secure, Path=/ and no Domain,
+      # so no other subdomain can read or plant it. Strict works with Dex on a sibling
+      # subdomain: same site, so the redirect back from Dex still carries it.
+      OAUTH2_PROXY_COOKIE_NAME: "__Host-userscripts-admin"
+      OAUTH2_PROXY_COOKIE_SECRET: "${WEB_COOKIE_SECRET:?set WEB_COOKIE_SECRET in .env}"
+      OAUTH2_PROXY_COOKIE_SECURE: "true"
+      OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
+      OAUTH2_PROXY_COOKIE_SAMESITE: "strict"
+      # 12 hours, never renewed silently: then you sign in again.
+      OAUTH2_PROXY_COOKIE_EXPIRE: "12h"
+      OAUTH2_PROXY_COOKIE_REFRESH: "0"
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    networks:
+      - services
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=services"
+      - "traefik.http.services.userscripts-admin.loadbalancer.server.port=4180"
+      - "traefik.http.routers.userscripts-admin.rule=Host(`${ADMIN_DOMAIN}`)"
+      - "traefik.http.routers.userscripts-admin.entrypoints=websecure"
+      - "traefik.http.routers.userscripts-admin.tls=true"
+      - "traefik.http.routers.userscripts-admin.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.userscripts-admin.service=userscripts-admin"
+      - "traefik.http.routers.userscripts-admin.middlewares=userscripts-admin-ratelimit,userscripts-admin-headers"
+      - "traefik.http.middlewares.userscripts-admin-ratelimit.ratelimit.average=120"
+      - "traefik.http.middlewares.userscripts-admin-ratelimit.ratelimit.period=1m"
+      - "traefik.http.middlewares.userscripts-admin-ratelimit.ratelimit.burst=60"
+      # For oauth2-proxy's own pages too; the server adds a CSP to its responses.
+      - "traefik.http.middlewares.userscripts-admin-headers.headers.frameDeny=true"
+      - "traefik.http.middlewares.userscripts-admin-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.userscripts-admin-headers.headers.referrerPolicy=no-referrer"
+      - "traefik.http.middlewares.userscripts-admin-headers.headers.stsSeconds=31536000"
 
 networks:
   services:

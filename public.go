@@ -1,7 +1,7 @@
 package main
 
 // Script downloads for Tampermonkey: no admin token or sign-in, but each script
-// needs its own read key in ?auth=. Also holds the response helpers api.go shares.
+// needs its own read key in ?auth=. Also holds the response helpers the other files share.
 
 import (
 	"errors"
@@ -24,17 +24,6 @@ func send(w http.ResponseWriter, status int, contentType string, body []byte) {
 
 func notFound(w http.ResponseWriter) {
 	send(w, http.StatusNotFound, "text/plain", []byte("not found"))
-}
-
-func base(r *http.Request) string {
-	if baseURL != "" {
-		return baseURL
-	}
-	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-		scheme = "https"
-	}
-	return scheme + "://" + r.Host
 }
 
 func scriptURL(base, name, ext, key string) string {
@@ -90,8 +79,8 @@ func servePublic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	extra := []string{
-		"// @updateURL    " + scriptURL(base(r), name, metaExt, key),
-		"// @downloadURL  " + scriptURL(base(r), name, scriptExt, key),
+		"// @updateURL    " + scriptURL(baseURL, name, metaExt, key),
+		"// @downloadURL  " + scriptURL(baseURL, name, scriptExt, key),
 	}
 	from, to := 0, len(lines)
 	if !full {

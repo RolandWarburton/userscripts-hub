@@ -1,8 +1,8 @@
 package main
 
-// Admin API under /api/, every route behind the ADMIN_TOKEN bearer token:
-// GET /api/scripts, GET/PUT/DELETE /api/scripts/{name}. The putScript,
-// listScripts and getScript helpers here are also what the MCP tools call.
+// Admin API on the dashboard host, behind oauth2-proxy and the Dex token check in web.go:
+// GET /api/scripts, GET/PUT/DELETE /api/scripts/{name}. The putScript, listScripts,
+// getScript and deleteScript helpers here are also what the MCP tools call.
 
 import (
 	"crypto/sha256"
@@ -54,18 +54,6 @@ func sendError(w http.ResponseWriter, err error) {
 	apiError(w, se.status, "%s", se.msg)
 }
 
-// requireAdmin accepts only "Authorization: Bearer <ADMIN_TOKEN>".
-func requireAdmin(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || !tokensMatch(token, adminToken) {
-			apiError(w, http.StatusUnauthorized, "unauthorized")
-			return
-		}
-		h(w, r)
-	}
-}
-
 type scriptInfo struct {
 	Name       string              `json:"name"`
 	Version    string              `json:"version"`
@@ -74,6 +62,7 @@ type scriptInfo struct {
 	SHA256     string              `json:"sha256,omitempty"`
 	Size       int                 `json:"size,omitempty"`
 	Modified   *time.Time          `json:"modified,omitempty"`
+	Domains    []string            `json:"domains,omitempty"` // from @match/@include; "*" is every site
 	Metadata   map[string][]string `json:"metadata,omitempty"`
 	Source     string              `json:"source,omitempty"`
 }
@@ -83,19 +72,26 @@ func sha(b []byte) string {
 	return hex.EncodeToString(s[:])
 }
 
-// storedVersion returns the stored script's @version, or "" if there's no script or no version.
-func storedVersion(name string) (string, bool, error) {
+// storedMeta returns the stored script's metadata block (nil if it has none) and whether
+// the script exists.
+func storedMeta(name string) (*meta, bool, error) {
 	src, err := os.ReadFile(scriptPath(name))
 	if errors.Is(err, fs.ErrNotExist) {
-		return "", false, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return "", false, err
+		return nil, false, err
 	}
-	if m := parseMeta(strings.Split(string(src), "\n")); m != nil {
-		return m.get("version"), true, nil
+	return parseMeta(strings.Split(string(src), "\n")), true, nil
+}
+
+// storedVersion returns the stored script's @version, or "" if there's no script or no version.
+func storedVersion(name string) (string, bool, error) {
+	m, exists, err := storedMeta(name)
+	if m == nil {
+		return "", exists, err
 	}
-	return "", true, nil
+	return m.get("version"), true, nil
 }
 
 // writeAtomic writes via a temp file and rename so a reader never sees half a script.
@@ -128,7 +124,7 @@ func checkName(name string) error {
 
 // putScript stores src as the script name, provided its @version is greater than the
 // stored one. who identifies the caller in the audit log. It reports whether the script is new.
-func putScript(base, name, who string, src []byte) (scriptInfo, bool, error) {
+func putScript(name, who string, src []byte) (scriptInfo, bool, error) {
 	if err := checkName(name); err != nil {
 		return scriptInfo{}, false, err
 	}
@@ -175,15 +171,16 @@ func putScript(base, name, who string, src []byte) (scriptInfo, bool, error) {
 	return scriptInfo{
 		Name:       name,
 		Version:    version,
-		InstallURL: scriptURL(base, name, scriptExt, key),
+		InstallURL: scriptURL(baseURL, name, scriptExt, key),
 		Key:        key,
 		SHA256:     sum,
 		Size:       len(src),
 	}, !exists, nil
 }
 
-// listScripts returns every stored script's name, version and install URL.
-func listScripts(base string) ([]scriptInfo, error) {
+// listScripts returns every stored script's name, version, domains, size, modified time and
+// install URL, read from the scripts directory on each call.
+func listScripts() ([]scriptInfo, error) {
 	entries, err := os.ReadDir(scriptsDir)
 	if err != nil {
 		log.Printf("[api] %v", err)
@@ -195,7 +192,7 @@ func listScripts(base string) ([]scriptInfo, error) {
 		if !ok || e.IsDir() || !nameRE.MatchString(name) {
 			continue
 		}
-		version, _, err := storedVersion(name)
+		m, _, err := storedMeta(name)
 		if err != nil {
 			log.Printf("[api] %s: %v", name, err)
 			continue
@@ -205,14 +202,22 @@ func listScripts(base string) ([]scriptInfo, error) {
 			log.Printf("[api] %s: %v", name, err)
 			continue
 		}
-		list = append(list, scriptInfo{Name: name, Version: version, InstallURL: scriptURL(base, name, scriptExt, key)})
+		info := scriptInfo{Name: name, InstallURL: scriptURL(baseURL, name, scriptExt, key)}
+		if m != nil {
+			info.Version, info.Domains = m.get("version"), siteDomains(m)
+		}
+		if st, err := e.Info(); err == nil {
+			mod := st.ModTime().UTC()
+			info.Size, info.Modified = int(st.Size()), &mod
+		}
+		list = append(list, info)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
 	return list, nil
 }
 
 // getScript returns a stored script with its source and metadata.
-func getScript(base, name string) (scriptInfo, error) {
+func getScript(name string) (scriptInfo, error) {
 	if err := checkName(name); err != nil {
 		return scriptInfo{}, err
 	}
@@ -236,7 +241,7 @@ func getScript(base, name string) (scriptInfo, error) {
 
 	info := scriptInfo{
 		Name:       name,
-		InstallURL: scriptURL(base, name, scriptExt, key),
+		InstallURL: scriptURL(baseURL, name, scriptExt, key),
 		Key:        key,
 		SHA256:     sha(src),
 		Size:       len(src),
@@ -246,61 +251,16 @@ func getScript(base, name string) (scriptInfo, error) {
 	info.Modified = &mod
 	if m := parseMeta(strings.Split(string(src), "\n")); m != nil {
 		info.Version = m.get("version")
+		info.Domains = siteDomains(m)
 		info.Metadata = m.fields
 	}
 	return info, nil
 }
 
-// apiPut handles PUT /api/scripts/<name> with the raw script as the body.
-func apiPut(w http.ResponseWriter, r *http.Request) {
-	src, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxUpload))
-	if err != nil {
-		var tooBig *http.MaxBytesError
-		if errors.As(err, &tooBig) {
-			apiError(w, http.StatusRequestEntityTooLarge, "script exceeds %d bytes", maxUpload)
-			return
-		}
-		apiError(w, http.StatusBadRequest, "reading body: %v", err)
-		return
-	}
-	info, created, err := putScript(base(r), r.PathValue("name"), "ip="+clientIP(r.Header, r.RemoteAddr), src)
-	if err != nil {
-		sendError(w, err)
-		return
-	}
-	status := http.StatusOK
-	if created {
-		status = http.StatusCreated
-	}
-	sendJSON(w, status, info)
-}
-
-// apiList handles GET /api/scripts.
-func apiList(w http.ResponseWriter, r *http.Request) {
-	list, err := listScripts(base(r))
-	if err != nil {
-		sendError(w, err)
-		return
-	}
-	sendJSON(w, http.StatusOK, list)
-}
-
-// apiGet handles GET /api/scripts/<name>.
-func apiGet(w http.ResponseWriter, r *http.Request) {
-	info, err := getScript(base(r), r.PathValue("name"))
-	if err != nil {
-		sendError(w, err)
-		return
-	}
-	sendJSON(w, http.StatusOK, info)
-}
-
-// apiDelete handles DELETE /api/scripts/<name>, removing the script and its key.
-func apiDelete(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if !nameRE.MatchString(name) {
-		apiError(w, http.StatusBadRequest, "name must match %s", nameRE)
-		return
+// deleteScript removes a stored script and its read key.
+func deleteScript(name, who string) error {
+	if err := checkName(name); err != nil {
+		return err
 	}
 
 	writeMu.Lock()
@@ -316,13 +276,70 @@ func apiDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		log.Printf("[api] %s: %v", name, err)
-		apiError(w, http.StatusInternalServerError, "deleting script failed")
-		return
+		return fail(http.StatusInternalServerError, "deleting script failed")
 	}
 	if !exists {
-		apiError(w, http.StatusNotFound, "no script %q", name)
+		return fail(http.StatusNotFound, "no script %q", name)
+	}
+	audit(who, "delete", name, oldVer, "", "")
+	return nil
+}
+
+// webCaller identifies a dashboard request in the audit log.
+func webCaller(r *http.Request) string {
+	return "user=" + r.Header.Get(userHeader) + " ip=" + clientIP(r.Header, r.RemoteAddr)
+}
+
+// apiPut handles PUT /api/scripts/<name> with the raw script as the body.
+func apiPut(w http.ResponseWriter, r *http.Request) {
+	src, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxUpload))
+	if err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			apiError(w, http.StatusRequestEntityTooLarge, "script exceeds %d bytes", maxUpload)
+			return
+		}
+		apiError(w, http.StatusBadRequest, "reading body: %v", err)
 		return
 	}
-	audit("ip="+clientIP(r.Header, r.RemoteAddr), "delete", name, oldVer, "", "")
+	info, created, err := putScript(r.PathValue("name"), webCaller(r), src)
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	sendJSON(w, status, info)
+}
+
+// apiList handles GET /api/scripts.
+func apiList(w http.ResponseWriter, r *http.Request) {
+	list, err := listScripts()
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	sendJSON(w, http.StatusOK, list)
+}
+
+// apiGet handles GET /api/scripts/<name>.
+func apiGet(w http.ResponseWriter, r *http.Request) {
+	info, err := getScript(r.PathValue("name"))
+	if err != nil {
+		sendError(w, err)
+		return
+	}
+	sendJSON(w, http.StatusOK, info)
+}
+
+// apiDelete handles DELETE /api/scripts/<name>, removing the script and its key.
+func apiDelete(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := deleteScript(name, webCaller(r)); err != nil {
+		sendError(w, err)
+		return
+	}
 	sendJSON(w, http.StatusOK, map[string]string{"deleted": name})
 }

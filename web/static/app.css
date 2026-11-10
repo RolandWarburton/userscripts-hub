@@ -1,0 +1,85 @@
+/* The page's own layout. tokens.css and bundle.css are the flat design system, copied
+   as they are; this file only arranges its pieces and adds the editor. */
+
+body { margin: 0; background: var(--bg); }
+.page { min-height: 100vh; padding: var(--space-16); display: grid; gap: var(--space-32); align-content: start; }
+
+.list-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8) var(--space-12);
+  margin-bottom: var(--space-12);
+}
+.list-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-12); min-width: 0; }
+.site-field { display: flex; align-items: center; gap: var(--space-8); min-width: 0; }
+.site-field .wc-label { margin: 0; }
+.site-field select { width: auto; max-width: 100%; min-width: 0; }
+
+/* The domains a script runs on, under its version and size: a flat tag each, tinted by a
+   hue hashed from the site's name (app.js sets --hue). Lightness and chroma are fixed, so
+   every tag reads the same; "every site" is the inverse block. */
+.row-sites {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) 6px;
+  margin-top: var(--space-4);
+  min-width: 0;
+}
+.site-tag {
+  display: inline-block;
+  max-width: 100%;
+  padding: 3px 7px;
+  font: 500 11px/1.3 var(--font-mono);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: oklch(93% 0.045 var(--hue, 0));
+  color: oklch(37% 0.11 var(--hue, 0));
+}
+.site-tag.is-all { background: var(--inverse); color: var(--on-inverse); }
+@media (prefers-color-scheme: dark) {
+  .site-tag:not(.is-all) {
+    background: oklch(33% 0.06 var(--hue, 0));
+    color: oklch(89% 0.07 var(--hue, 0));
+  }
+}
+.wc-pane-list .problem { margin-top: var(--space-12); }
+
+.facts { display: grid; gap: var(--gap); }
+.fact-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-12); }
+.fact-line a { min-width: 0; overflow-wrap: anywhere; }
+
+/* Status is quiet; problems are a solid block, as status is everywhere in the system. */
+.wc-status { color: var(--muted); }
+.problem {
+  margin: 0 0 var(--space-12);
+  padding: 12px 14px;
+  background: var(--inverse);
+  color: var(--on-inverse);
+  font-weight: 600;
+}
+
+.hint { margin: var(--space-8) 0 0; font: 400 12px/1.5 var(--font-mono); color: var(--muted); }
+.hint.is-bad { color: var(--fg); font-weight: 600; }
+
+/* The editor: a plain textarea on the ground, like the system's logs. */
+.editor {
+  display: block;
+  width: 100%;
+  min-height: 60vh;
+  margin: 0;
+  padding: var(--space-12) 14px;
+  border: 0;
+  border-radius: var(--radius-none);
+  resize: vertical;
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 13px/1.6 var(--font-mono);
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+}
+.editor:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

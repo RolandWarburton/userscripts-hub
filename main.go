@@ -14,15 +14,13 @@ const (
 	scriptExt = ".user.js"
 	metaExt   = ".meta.js"
 	maxUpload = 1 << 20
-	minToken  = 32
 )
 
 var (
 	scriptsDir = env("SCRIPTS_DIR", "/scripts")
 	keysDir    = env("KEYS_DIR", "/keys")
 	port       = env("PORT", "8080")
-	baseURL    = strings.TrimSuffix(os.Getenv("BASE_URL"), "/") // derived from the request if unset
-	adminToken = os.Getenv("ADMIN_TOKEN")
+	baseURL    = strings.TrimSuffix(os.Getenv("BASE_URL"), "/") // the public script host, e.g. https://userscripts.example.net
 	ntfyURL    = os.Getenv("NTFY_URL")
 	ntfyToken  = os.Getenv("NTFY_TOKEN")
 
@@ -54,9 +52,18 @@ func main() {
 		healthcheck()
 	}
 
-	if len(adminToken) < minToken {
-		log.Fatalf("ADMIN_TOKEN must be set and at least %d characters (openssl rand -base64 32)", minToken)
+	if baseURL == "" {
+		log.Fatalf("BASE_URL must be set (the public URL scripts are served from)")
 	}
+	adminDomain := os.Getenv("ADMIN_DOMAIN")
+	if adminDomain == "" || strings.ContainsAny(adminDomain, "/:") {
+		log.Fatalf("ADMIN_DOMAIN must be set to the dashboard's host name, e.g. userscripts-admin.example.net")
+	}
+	verifier, err := newDexVerifier(os.Getenv("MCP_OIDC_ISSUER"), os.Getenv("MCP_ALLOWED_EMAILS"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	webAudience := env("WEB_OIDC_CLIENT_ID", "userscripts-web")
 	if ntfyURL == "" {
 		log.Printf("NTFY_URL not set: API writes will only be logged")
 	} else if ntfyToken == "" {
@@ -75,14 +82,8 @@ func main() {
 		send(w, http.StatusOK, "text/plain", []byte("ok"))
 	})
 	mux.HandleFunc("GET /{file}", servePublic) // GET patterns also match HEAD
-	mux.HandleFunc("PUT /api/scripts/{name}", requireAdmin(apiPut))
-	mux.HandleFunc("GET /api/scripts", requireAdmin(apiList))
-	mux.HandleFunc("GET /api/scripts/{name}", requireAdmin(apiGet))
-	mux.HandleFunc("DELETE /api/scripts/{name}", requireAdmin(apiDelete))
-	mcpRoutes(mux)
-	mux.HandleFunc("/api/", requireAdmin(func(w http.ResponseWriter, r *http.Request) {
-		apiError(w, http.StatusNotFound, "no such endpoint: %s %s", r.Method, r.URL.Path)
-	}))
+	mcpRoutes(mux, verifier)
+	webRoutes(mux, adminDomain, &webGuard{v: verifier, audience: webAudience})
 
 	srv := &http.Server{
 		Addr:              ":" + port,
@@ -92,6 +93,7 @@ func main() {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	log.Printf("serving %s (keys in %s) on :%s", scriptsDir, keysDir, port)
+	log.Printf("serving %s (keys in %s) on :%s; dashboard on %s for %s", scriptsDir, keysDir, port,
+		adminDomain, strings.Join(verifier.allowed, ", "))
 	log.Fatal(srv.ListenAndServe())
 }

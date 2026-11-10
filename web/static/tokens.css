@@ -1,0 +1,21 @@
+/* Flat design system: tokens, generated from the design system's tokens.json. */
+:root {
+  --bg: #f2f2f0; --layer: #ffffff; --layer-2: #e6e6e3; --layer-hover: #ececea; --layer-2-hover: #bcbcb9;
+  --fg: #121212; --muted: #5c5f63; --inverse: #121212; --on-inverse: #f2f2f0; --inverse-hover: #313131;
+  --accent: #0043ce; --accent-hover: #002d9c; --on-accent: #ffffff; --accent-tint: #dbe5f8; --accent-flash: #b2c7f0;
+  --hot: #c21b24; --hot-hover: #a2191f; --on-hot: #ffffff; --hot-deep: #92141b;
+  --near: #005d5d; --near-tint: #deeaea; --far: #6929c4; --far-tint: #ece3f7;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --gap: 2px; --space-4: 4px; --space-8: 8px; --space-12: 12px; --space-16: 16px; --space-24: 24px; --space-32: 32px;
+  --radius-none: 0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0f10; --layer: #1b1c1e; --layer-2: #2a2c2f; --layer-hover: #232427; --layer-2-hover: #525456;
+    --fg: #f2f2f0; --muted: #a2a6ab; --inverse: #f2f2f0; --on-inverse: #0e0f10; --inverse-hover: #d2d2d1;
+    --accent: #78a9ff; --accent-hover: #a6c8ff; --on-accent: #0e0f10; --accent-tint: #28303e; --accent-flash: #374662;
+    --hot: #ff6f76; --hot-hover: #ff8f94; --on-hot: #0e0f10; --hot-deep: #ffa9ad;
+    --near: #08bdba; --near-tint: #193132; --far: #be95ff; --far-tint: #302c3b;
+  }
+}

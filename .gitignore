@@ -4,3 +4,4 @@ keys/*
 !keys/.gitkeep
 .env
 /server
+/userscripts
