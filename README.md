@@ -2,6 +2,12 @@
 
 A small Go server that hosts private Tampermonkey userscripts, so installs update themselves.
 
+<p align="center">
+  <img src="screenshots/02-script-open.png" alt="The dashboard in light mode, with a script open in the editor" width="48%">
+  &emsp;
+  <img src="screenshots/07-dark.png" alt="The dashboard in dark mode, with a script open in the editor" width="48%">
+</p>
+
 ## How it works
 
 - Each script lives in `scripts/<name>.user.js` and gets a random read key in `keys/<name>`.
